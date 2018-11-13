@@ -1,0 +1,1169 @@
+#!/bin/sh
+
+# Shadows Live Script
+# Init Script for Shadows_21 Linux
+# Author: Andi S. <andisetiyawan210595@gmail.com> <https://github.com/AndiSetiyawan>
+# This software inspired by Linux Live Kit scripts, Tomas M. <http://www.linux-live.org>
+# Last modified: 22.08.2018 20:47
+# 
+
+SCRIPT_VER="2.2-final"
+SCRIPT_CODENAME="Shadows21-Z4-LiveScript-2.2-final"
+SCRIPT_AUTHOR="AndiSetiyawan"
+
+# Default value of Shadows Live Script
+#
+update_default_value()
+{
+	debug_log "update_default_value" "$*"
+	live_log "update_default_value" "$*"
+	
+	SYSNAME="Shadows" # System Name
+	KERNEL=$(uname -r) # Automaticaly updated from booted kernel
+	ARCHDIR32=System32
+	ARCHDIR64=System64
+	BEXT=shb # Bundle Extention
+	SYSBUN=SystemBundle
+	ARCH=`uname -m`; [ $ARCH = x86_64 ] || ARCH=x86
+	if [ "$ARCH" = "x86_64" ]; then; ARCHDIR="$ARCHDIR64"; else; ARCHDIR="$ARCHDIR32"; fi
+	MKMOD="bin etc home lib lib64 opt root sbin srv usr var"
+	EXCLUDE="/etc/fstab /etc/mtab"
+	LMK="lib/modules/$KERNEL"
+	MEMORY=/memory
+	CHANGES=$MEMORY/changes
+	UNION=$MEMORY/union
+	DATAMNT=$MEMORY/data
+	BUNDLES=$MEMORY/bundles
+	SYSDIR=$SYSNAME.sys
+}
+
+# Live log header
+#
+head_live_log()
+{
+	rm -f /var/log/live
+	live_log "#############################################################################################################"
+	live_log "# Shadows_Live_Script_Log"
+	live_log "# Script_Version=$SCRIPT_VER Script_Codename=$SCRIPT_CODENAME Script_Author=$SCRIPT_AUTHOR"
+	live_log "# Date=$(date +%A_%d/%B/%Y_%Z_%H:%M:%S) User=$(whoami) Host=$(hostname)"
+	live_log "#############################################################################################################"
+	live_log " "
+}
+
+# get value of commandline
+# $1 = parameter to search for
+#
+cmdline_value()
+{
+	cat /proc/cmdline | egrep -o "(^|[[:space:]])$1=[^[:space:]]+" | tr -d " " | cut -d "=" -f 2- | tail -n 1
+}
+
+# update binary vlaue from cmdline
+#
+update_cmdline_binary_value()
+{
+	debug_log "update_cmdline_binary_value" "$*"
+	live_log "update_cmdline_binary_value" "$*"
+	local cmdline
+	
+	cmdline=/proc/cmdline
+	
+	if grep -q debug $cmdline; then
+		DEBUG=1
+	else
+		DEBUG=
+	fi
+	
+	if grep -q toram $cmdline; then
+		TORAM=1
+	else
+		TORAM=
+	fi
+	
+	if grep -q save $cmdline; then
+		SAVE=1
+	else
+		SAVE=
+	fi
+	
+	if grep -q rootcopy $cmdline; then
+		ROOTCOPY=1
+	else
+		ROOTCOPY=
+	fi
+	
+	if grep -q load32 $cmdline; then
+		LOAD32=1
+	else
+		LOAD32=
+	fi
+	
+	if grep -q zram $cmdline; then
+		ZRAM=1
+	else
+		ZRAM=
+	fi
+	
+	if grep -q loop $cmdline; then
+		LOOP=1
+	else
+		LOOP=
+	fi
+	
+	if grep -q automount $cmdline; then
+		AUTOMOUNT=1
+	else
+		AUTOMOUNT=
+	fi
+}
+
+# update string value from cmdline
+#
+update_cmdline_string_value()
+{
+	debug_log "update_cmdline_string_value" "$*"
+	live_log "update_cmdline_string_value" "$*"
+	
+	SAVE_DIR=$(cmdline_value save_dir)
+	if [ "$SAVE_DIR" = "" ]; then
+		SAVE_DIR=Changes
+	fi
+
+	SAVE_FILE=$(cmdline_value save_file)
+	if [ "$SAVE_FILE" = "" ]; then
+		SAVE_FILE=Changes.dat
+	fi
+
+	ROOTCOPY_DIR=$(cmdline_value rootcopy_dir)
+	if [ "$ROOTCOPY_DIR" = "" ]; then
+		ROOTCOPY_DIR=RootCopy
+	fi
+
+	LOAD_ADDITION=$(cmdline_value load_addition)
+	NOLOAD_ADDITION=$(cmdline_value noload_addition)
+	LOAD_FIRMWARE=$(cmdline_value load_firmware)
+	NOLOAD_FIRMWARE=$(cmdline_value noload_firmware)
+	FROM=$(cmdline_value from)
+	LOOP_FILE=$(cmdline_value loop_file)
+	BOOT_DEV=$(cmdline_value boot_dev)
+	IP=$(cmdline_value ip)
+	CACHE=$(cmdline_value cache | sed -r "s/[^0-9]//g" | sed -r "s/^0+//g")
+}
+
+header()
+{
+	echo "[0;1m""$@""[0;0m"
+}
+
+echo_green_star()
+{
+	echo -ne "[0;32m""[*] ""[0;39m" 
+}
+
+echo_green_arrow()
+{
+	echo -ne "[0;32m"" > ""[0;39m" 
+}
+
+echo_red_star()
+{
+	echo -ne "[0;31m""[*] ""[0;39m" 
+}
+
+echo_red_arrow()
+{
+	echo -ne "[0;31m"" > ""[0;39m" 
+}
+
+echo_yellow_star()
+{
+	echo -ne "[0;33m""[*] ""[0;39m" 
+}
+
+echo_star()
+{
+	echo -ne "[*] " 
+}
+
+echo_alert()
+{
+	echo -ne "[0;31m""[!] ""[0;39m" 
+}
+
+# log - store given text in /var/log/live_debugging
+#
+debugging_log()
+{
+	echo "$@" 2>/dev/null >>/var/log/live_debugging
+}
+
+# echo + log debugging
+#
+echo_debugging_log()
+{
+	echo "$@"
+	debugging_log "$@"
+}
+
+# write debug log
+#
+debug_log()
+{
+	if [ "$DEBUG" ]; then
+		echo "- debug: $*" >&2
+		debugging_log "- debug: $*"
+	fi
+}
+
+# write live log
+#
+live_log()
+{
+	echo "$@" 2>/dev/null >>/var/log/live
+}
+
+echo_ne()
+{
+	echo -ne "$*"
+}
+
+# write all value to live log
+#
+value_live_log()
+{
+	debug_log "value_live_log" "$*"
+	live_log "value_live_log" "$*"
+	
+	live_log "SYSNAME=$SYSNAME"
+	live_log "KERNEL=$KERNEL"
+	live_log "ARCHDIR32=$ARCHDIR32"
+	live_log "ARCHDIR64=$ARCHDIR64"
+	live_log "BEXT=$BEXT"
+	live_log "ARCH=$ARCH"
+	live_log "ARCHDIR=$ARCHDIR"
+	live_log "LMK=$LMK"
+	live_log "MEMORY=$MEMORY"
+	live_log "CHANGES=$CHANGES"
+	live_log "UNION=$UNION"
+	live_log "DATAMNT=$DATAMNT"
+	live_log "BUNDLES=$BUNDLES"
+	live_log "SYSDIR=$SYSDIR"
+	live_log "DEBUG=$DEBUG"
+	live_log "TORAM=$TORAM"
+	live_log "SAVE=$SAVE"
+	live_log "ROOTCOPY=$ROOTCOPY"
+	live_log "LOAD32=$LOAD32"
+	live_log "ZRAM=$ZRAM"
+	live_log "LOOP=$LOOP"
+	live_log "AUTOMOUNT=$AUTOMOUNT"
+	live_log "SAVE_DIR=$SAVE_DIR"
+	live_log "SAVE_FILE=$SAVE_FILE"
+	live_log "ROOTCOPY_DIR=$ROOTCOPY_DIR"
+	live_log "LOAD_ADDITION=$LOAD_ADDITION"
+	live_log "NOLOAD_ADDITION=$NOLOAD_ADDITION"
+	live_log "LOAD_FIRMWARE=$LOAD_FIRMWARE"
+	live_log "NOLOAD_FIRMWARE=$NOLOAD_FIRMWARE"
+	live_log "FROM=$FROM"
+	live_log "LOOP_FILE=$LOOP_FILE"
+	live_log "BOOT_DEV=$BOOT_DEV"
+	live_log "IP=$IP"
+	live_log "CACHE=$CACHE"
+}
+
+# debug_shell
+# executed when debug boot parameter is present
+#
+debug_shell()
+{
+	if [ "$DEBUG" ]; then
+		echo
+		echo_yellow_star; header "Debug"
+		echo " Debugging started"
+		echo " Ctrl+D to continue booting."
+		echo
+		setsid sh -c 'exec sh < /dev/tty1 >/dev/tty1 2>&1'
+		echo
+	fi
+}
+
+# show fatal massage
+#
+fatal()
+{
+	echo_debugging_log
+	echo_alert
+	header "Fatal error occured - $1"
+	echo_debugging_log " Something went wrong."
+	echo_debugging_log " Ctrl+Alt+Delete to reboot computer"
+	echo_debugging_log
+	setsid sh -c 'exec sh < /dev/tty1 >/dev/tty1 2>&1'
+}
+
+# test if the script is started by root user. If not, exit
+#
+allow_only_root()
+{
+	if [ "0$UID" -ne 0 ]; then
+		echo_alert
+		echo "Only root can run $(basename $0)"; exit 1
+	fi
+}
+
+# Create bundle
+# call mksquashfs with apropriate arguments
+# $1 = directory which will be compressed to squashfs bundle
+# $2 = output file
+# $3..$9 = optional arguments like -keep-as-directory or -b 123456789
+#
+create_bundle()
+{
+	debug_log "create_bundle" "$*"
+	live_log "create_bundle" "$*"
+	
+	rm -f "$2" # overwrite, never append to existing file
+	mksquashfs "$1" "$2" -comp xz -b 512K $3 $4 $5 $6 $7 $8 $9>/dev/null
+}
+
+# Move entire initramfs tree to tmpfs mount.
+# It's a bit tricky but is necessray to enable pivot_root
+# even for initramfs boot image
+#
+transfer_initramfs()
+{
+	if [ ! -r /lib/initramfs_escaped ]; then
+		echo_star; echo "Switching root from initramfs to ramfs ..."
+		SWITCH=/m # one letter directory
+		mkdir -p $SWITCH
+		mount -t tmpfs -o size="100%" tmpfs $SWITCH
+		cp -a /??* $SWITCH 2>/dev/null # only copy two-and-more-letter directories
+		cd $SWITCH
+		echo "Successfully escaped initramfs" > $SWITCH/lib/initramfs_escaped
+		exec switch_root -c /dev/console . $0
+	fi
+}
+
+# mount virtual filesystems like proc etc
+#
+init_proc_sysfs()
+{
+	debug_log "init_proc_sysfs" "$*"
+	live_log "init_proc_sysfs" "$*"
+	
+	mkdir -p /proc /sys /etc $MEMORY
+	mount -n -t proc proc /proc
+	echo "0" >/proc/sys/kernel/printk
+	mount -n -t sysfs sysfs /sys
+	mount -n -o remount,rw rootfs /
+	ln -sf /proc/mounts /etc/mtab
+}
+
+# refresh devices
+#
+refresh_devs()
+{
+	debug_log "refresh_devs" "$*"
+	live_log "refresh_devs" "$*"
+	
+	if [ -r /proc/sys/kernel/hotplug ]; then
+		echo /sbin/mdev > /proc/sys/kernel/hotplug
+	fi
+	
+	mdev -s
+}
+
+# modprobe all modules found in initial ramdisk
+# $1 = -e for match, -v for negative match
+# $2 = regex pattern
+#
+modprobe_all()
+{
+	debug_log "modprobe_all" "$*"
+	live_log "modprobe_all" "$*"
+	
+	echo_star >&2; echo "Probing for hardware ..." >&2
+	find /lib/modules/ | fgrep .ko | egrep $1 $2 | sed -r "s:^.*/|[.]ko\$::g" | xargs -n 1 modprobe 2>/dev/null
+	refresh_devs
+}
+
+# make sure some devices are there
+#
+init_devs()
+{
+	debug_log "init_devs" "$*"
+	live_log "init_devs" "$*"
+	
+	echo /sbin/mdev > /proc/sys/kernel/hotplug
+	mdev -s
+	modprobe zram 2>/dev/null
+	modprobe loop 2>/dev/null
+	modprobe squashfs 2>/dev/null
+	modprobe fuse 2>/dev/null
+}
+
+# Activate zram (auto-compression of RAM)
+# Compressed RAM consumes 1/2 or even 1/4 of original size
+# Setup static size of 500MB
+#
+init_zram()
+{
+	debug_log "init_zram" "$*"
+	live_log "init_zram" "$*"
+	
+	if [ ! "$ZRAM" ]; then
+		return
+	fi
+	
+	debug_log "init_zram" "$*"
+	live_log "init_zram" "$*"
+	echo_star; echo "Setting dynamic RAM compression using ZRAM ..."
+	echo 536870912 > /sys/block/zram0/disksize # 512MB
+	mkswap /dev/zram0 >/dev/null
+	swapon /dev/zram0 -p 32767
+	echo 100 > /proc/sys/vm/swappiness
+}
+
+# load the AUFS kernel module if needed
+#
+init_aufs()
+{
+	debug_log "init_aufs" "$*"
+	live_log "init_aufs" "$*"
+	
+	# TODO maybe check here if aufs support is working at all
+	# and procude useful error message if user has no aufs
+	modprobe aufs 2>/dev/null
+}
+
+# Setup empty union
+# $1 = changes directory (ramfs or persistent changes)
+# $2 = union directory where to mount the union
+#
+init_union()
+{
+	debug_log "init_union" "$*"
+	live_log "init_union" "$*"
+	
+	echo_star; echo "Setting up union using AUFS ..."
+	mkdir -p "$1"
+	mkdir -p "$2"
+	#mount -t aufs -o xino="/.xino",trunc_xino,br="$1" aufs "$2"
+	mount -t aufs -o xino="/.xino",br="$1" aufs "$2"
+}
+
+# Return device mounted for given directory
+# $1 = directory
+#
+mounted_dev()
+{
+	debug_log "mounted_dev" "$*"
+	live_log "mounted_dev" "$*"
+	local MNT TARGET
+	
+	MNT="$1"
+	
+	while [ "$MNT" != "/" -a "$MNT" != "." -a "$MNT" != "" ]; do
+		TARGET="$(grep -F " $MNT " /proc/mounts | cut -d " " -f 1)"
+		if [ "$TARGET" != "" ]; then
+			echo "$TARGET"
+			return
+		fi
+		MNT="$(dirname "$MNT")"
+	done
+}
+
+# Return mounted dir for given directory
+# $1 = directory
+#
+mounted_dir()
+{
+	debug_log "mounted_dir" "$*"
+	live_log "mounted_dir" "$*"
+	local MNT
+	
+	MNT="$1"
+	
+	while [ "$MNT" != "/" -a "$MNT" != "." -a "$MNT" != "" ]; do
+		if mountpoint -q "$MNT" 2>/dev/null; then
+			echo "$MNT"
+			return
+		fi
+		MNT="$(dirname "$MNT")"
+	done
+}
+
+# Make sure to mount FAT12/16/32 using vfat
+# in order to support long filenames
+# $1 = device
+#
+device_fs()
+{
+	debug_log "device_fs" "$*"
+	live_log "device_fs" "$*"
+	local FS
+	
+	FS=$(blkid "$1" | sed -r "s/.*TYPE=//" | tr -d '"' | tr [A-Z] [a-z])
+	
+	if [ "$FS" = "msdos" -o "$FS" = "fat" -o "$FS" = "vfat" ]; then
+		FS="vfat"
+	elif [ "$FS" = "ntfs" ]; then
+		FS="ntfs-3g"
+	fi
+	
+	echo "-t $FS"
+}
+
+# Filesystem options for mount
+# $1 = filesystem or '-t filesystem'
+#
+fs_options()
+{
+	debug_log "fs_options" "$*"
+	live_log "fs_options" "$*"
+	
+	if [ "$1" = "-t" ]; then
+		shift
+	fi
+	
+	if [ "$1" = "vfat" ]; then
+		echo "-o check=s,shortname=mixed,iocharset=utf8"
+	fi
+}
+
+# echo first network device known at the moment of calling, eg. eth0
+#
+network_dev()
+{
+	debug_log "network_dev" "$*"
+	live_log "network_dev" "$*"
+	
+	cat /proc/net/dev | grep : | grep -v lo: | cut -d : -f 1 | tr -d " " | head -n 1
+}
+
+# Modprobe network kernel modules until a working driver is found.
+# These drivers are (or used to be) probed in Slackware's initrd.
+# The function returns the first device found, yet it doesn't have
+# to be a working one, eg. if the computer has two network interfaces
+# and ethernet cable is plugged only to one of them.
+#
+init_network_dev()
+{
+	debug_log "init_network_dev" "$*"
+	live_log "init_network_dev" "$*"
+	local MODULE ETH NETDEV
+	
+	for MODULE in 3c59x acenic de4x5 e1000 e1000e e100 epic100 hp100 \
+	ne2k-pci pcnet32 8139too 8139cp tulip via-rhine r8169 atl1e yellowfin \
+	tg3 dl2k ns83820 atl1 b44 bnx2 skge sky2 tulip depca 3c501 3c503 \
+	3c505 3c507 3c509 3c515 ac3200 at1700 cosa cs89x0 de600 de620 e2100 \
+	eepro eexpress eth16i ewrk3 forcedeth hostess_sv11 hp-plus hp ni52 \
+	ni65 sb1000 sealevel smc-ultra sis900 smc9194 wd; do
+		modprobe $MODULE 2>/dev/null
+		ETH="$(cat /proc/net/dev | grep : | grep -v lo: | cut -d : -f 1 | tr -d " " | head -n 1)"
+		if [ "$ETH" != "" ]; then
+			echo $ETH
+			live_log "ETH=$ETH"
+			return 0
+		fi
+		rmmod $MODULE 2>/dev/null
+	done
+	
+	modprobe_all -e /drivers/net/ # none of the above specified modules worked, try to modprobe everything.
+	NETDEV=$(network_dev)
+	echo "$NETDEV"
+	live_log "NETWORK_DEV=$NETDEV"
+}
+
+# Initialize network IP address
+# either static from ip=bootparameter, or from DHCP
+#
+init_network_ip()
+{
+	debug_log "init_network_ip" "$*"
+	live_log "init_network_ip" "$*"
+	local ETH SCRIPT CLIENT SERVER GW MASK
+	
+	SCRIPT=/tmp/dhcpscript
+	ETH=$(init_network_dev)
+	echo_star >&2; echo "Setting up network ..." >&2
+	
+	if [ "$IP" != "" ]; then
+		# set IP address as given by boot paramter
+		echo "$IP" | while IFS=":" read CLIENT SERVER GW MASK; do
+			ifconfig $ETH "$CLIENT" netmask "$MASK"
+			route add default gw "$GW"
+			echo nameserver "$GW" >> /etc/resolv.conf
+			echo nameserver "$SERVER" >> /etc/resolv.conf
+			live_log "IP=$IP" "CLIENT=$CLIENT" "SERVER=$SERVER" "GW=$GW" "MASK=$MASK"
+		done
+	else
+		# if client ip is unknown, try to get a DHCP lease
+		ifconfig $ETH up
+		echo -e '#!/bin/sh\nif [ "$1" != "bound" ]; then exit; fi\nifconfig $interface $ip netmask $subnet\nroute add default gw $router\necho nameserver $dns >>/etc/resolv.conf' >$SCRIPT
+		chmod a+x $SCRIPT
+		udhcpc -i $ETH -n -s $SCRIPT -q >/dev/null
+	fi
+}
+
+# Mount data from http using httpfs
+# $1 = from URL
+# $2 = target
+#
+mount_data_http()
+{
+	debug_log "mount_data_http" "$*"
+	live_log "mount_data_http" "$*"
+	local CACHE
+	
+	echo_star >&2; echo "Load data from $1 ..." >&2
+	
+	if [ "$CACHE" != "" ]; then
+		CACHE="-C /tmp/httpfs.cache -S "$(($CACHE*1024*1024))
+		live_log "HTTPFS_CACHE=$CACHE"
+	fi
+	
+	init_network_ip
+	
+	if [ "$(network_dev)" != "" ]; then
+		echo_star >&2; echo "Mounting remote file..." >&2
+		mkdir -p "$2"
+		mount.httpfs2 -r 9999 -t 5 $CACHE -c /dev/null "$1" "$2" -o ro >/dev/null 2>/dev/null
+		mount -o loop "$2"/* "$2" # self mount
+		echo "$2/$SYSNAME"
+	fi
+}
+
+# Download data from tftp
+# $1 = target (store downloaded files there)
+#
+download_data_pxe()
+{
+	debug_log "download_data_pxe" "$*"
+	live_log "download_data_pxe" "$*"
+	local CMD CLIENT SERVER GW MASK PORT PROTOCOL
+	
+	mkdir -p "$1/$SYSNAME"
+	
+	echo "$IP" | while IFS=":" read CLIENT SERVER GW MASK PORT; do
+		echo_star >&2; echo "Contacting PXE server $SERVER ..." >&2
+		if [ "$PORT" = "" ]; then PORT="7529"; live_log "PORT=$PORT"; fi
+		init_network_ip
+		echo_star; echo "Downloading PXE file list ..."
+		PROTOCOL=http
+		wget -q -O "$1/PXEFILELIST" "http://$SERVER:$PORT/PXEFILELIST?$(uname -r):$(uname -m)"
+		if [ $? -ne 0 ]; then
+			echo_red_star >&2; echo "Error downloading from http://$SERVER:$PORT, trying TFTP" >&2
+			PROTOCOL=tftp
+			tftp -g -r PXEFILELIST -l "$1/PXEFILELIST" $SERVER
+		fi
+		live_log "PROTOCOL=$PROTOCOL"
+		echo_star; echo "Downloading files from the list ..."
+		cat "$1/PXEFILELIST" | while read FILE; do
+			if [ "$PROTOCOL" = "http" ]; then
+				wget -O "$1/$SYSNAME/$FILE" "http://$SERVER:$PORT/$FILE"
+			else
+				echo "* $FILE ..." >&2
+				tftp -g -r $FILE -l "$1/$SYSNAME/$FILE" $SERVER
+			fi
+		done
+	done
+	
+	echo "$1/$SYSNAME"
+}
+
+# Find Systen Directory by mounting all devices
+# If found, keep mounted, else unmount
+# $1 = data directory target (mount here)
+# $2 = data directory which contains compressed bundles
+#
+find_sysdir_try()
+{
+	debug_log "find_sysdir_try" "$*"
+	live_log "find_sysdir_try" "$*"
+	local DEVICE FS OPTIONS BOOTD OPS FULL_ARCHDIR SB
+	
+	FULL_ARCHDIR="$1/$2/$SYSDIR/$ARCHDIR"
+	SB="$FULL_ARCHDIR/$SYSBUN"
+	mkdir -p "$1"
+	
+	blkid | sort | grep "$BOOT_DEV" | cut -d: -f 1 | grep -E -v "/loop|/ram|/zram" | while read DEVICE; do
+		FS="$(device_fs "$DEVICE")"
+		OPTIONS="$(fs_options $FS)"
+		mount -r "$DEVICE" "$1" $FS $OPTIONS 2>/dev/null
+
+		if [ "$LOOP" ]; then
+			if [ -f "$1/$LOOP_FILE" ]; then
+				mkdir -p "$1/../LoopSysDir"
+				mount -o loop,ro "$1/$LOOP_FILE" "$1/../LoopSysDir" 2>/dev/null
+				FROM="../LoopSysDir/$SYSNAME"
+				live_log "LOOP_SYSDIR=1"
+			fi
+		fi
+		if [ -f "$SB/00-Kernel-$KERNEL.$BEXT" ]; then
+			mount -o remount,rw "$DEVICE" "$1" 2>/dev/null
+			echo "$1/$2/$SYSDIR" | tr -s "/" | sed -r "s:/[^/]+/[.][.]/:/:g"
+			live_log "BUNDLE_SYSDIR=1"
+			return
+		fi
+		
+		# unmount twice, since there could be mounted ISO as loop too. If not, it doesn't hurt
+		umount "$1" 2>/dev/null
+		umount "$1" 2>/dev/null
+	done
+}
+
+# Retry finding System Directory several times,
+# until timeouted or until data is found
+# $1 = timeout
+# $2 = data directory target (mount here)
+#
+find_sysdir()
+{
+	debug_log "find_sysdir" "$*"
+	live_log "find_sysdir" "$*"
+	local SYSTEM_DIRECTORY FROM BOOT_DEVICE
+	
+	if [ "$(cmdline_value ip)" != "" ]; then
+		download_data_pxe "$2"
+		return
+	fi
+	
+	FROM="$(cmdline_value from)"
+	
+	if [ "$FROM" = "" ]; then FROM="$SYSNAME"; fi
+	
+	echo_green_star >&2; echo -n "Looking for $SYSNAME system directory in /$FROM" | tr -s "/" >&2
+	
+	for timeout in $(seq 1 $1); do
+		echo -n "." >&2
+		SYSTEM_DIRECTORY="$(find_sysdir_try "$2" "$FROM")"
+		if [ "$SYSTEM_DIRECTORY" != "" ]; then
+			echo "" >&2
+			BOOT_DEVICE="$(mounted_dev "$2")"
+			echo_green_star >&2; echo "Found on $BOOT_DEVICE" >&2
+			echo "$SYSTEM_DIRECTORY"
+			live_log "BOOT_DEVICE=$BOOT_DEVICE" "FULL_SYSDIR=$SYSTEM_DIRECTORY"
+			return
+		fi
+		sleep 1
+	done
+	
+	echo "" >&2
+	
+	if [ "$SYSTEM_DIRECTORY" = "" ]; then
+		fatal "$SYSNAME data not found"
+	fi
+}
+
+# Activate persistent changes
+# $1 = data directory
+# $2 = target changes directory
+#
+persistent_changes()
+{
+	debug_log "persistent_changes" "$*"
+	live_log "persistent_changes" "$*"
+	local T1 T2 EXISTS FULL_SAFE_FILE FULL_SAVE_DIR
+	
+	if [ ! -d "$1/$ARCHDIR/$SAVE_DIR" ]; then
+		mkdir -p "$1/$ARCHDIR/$SAVE_DIR"
+		FULL_SAVE_DIR="$1/$ARCHDIR/$SAVE_DIR"
+	else
+		FULL_SAVE_DIR="$1/$ARCHDIR/$SAVE_DIR"
+	fi
+	
+	T1="$FULL_SAVE_DIR/.empty"
+	T2="$T1"2
+	mkdir -p "$2"
+	
+	if [ ! "$SAVE" ]; then
+		return
+	fi
+	
+	touch "$T1" 2>/dev/null && rm -f "$T1" 2>/dev/null
+	
+	if [ $? -ne 0 ]; then
+		echo_red_star; echo "Persistent changes not writable or not used"
+		return
+	fi
+	
+	echo_star; echo "Testing persistent changes for posix compatibility ..."
+	touch "$T1" && ln -sf "$T1" "$T2" 2>/dev/null && \
+	chmod +x "$T1" 2>/dev/null && test -x "$T1" && \
+	chmod -x "$T1" 2>/dev/null && test ! -x "$T1" && \
+	rm "$T1" "$T2" 2>/dev/null
+	
+	if [ $? -eq 0 ]; then
+		echo_star; echo "Activating native persistent changes ..."
+		mount --bind "$FULL_SAVE_DIR" "$2"
+		live_log "NATIVE_PERSISTENT_CHANGES=1" "FULL_SAVE_DIR=$FULL_SAVE_DIR/"
+		return
+	fi
+	
+	FULL_SAFE_FILE=$FULL_SAVE_DIR/$SAVE_FILE
+	
+	if [ -e "$FULL_SAVE_DIR/$SAVE_FILE" ]; then
+		echo_star; echo "Restoring persistent changes ..."
+		EXISTS="true"
+		live_log "NEW_PERSISTENT_CHANGES_FILE=" "FULL_SAFE_FILE=$FULL_SAFE_FILE"
+	else
+		echo_star; echo "Creating new persistent changes ..."
+		EXISTS=""
+		live_log "NEW_PERSISTENT_CHANGES_FILE=1" "FULL_SAFE_FILE=$FULL_SAFE_FILE"
+	fi
+	
+	mount.dynfilefs "$FULL_SAVE_DIR/$SAVE_FILE" 4000 "$2"
+	
+	if [ ! "$EXISTS" ]; then
+		mke2fs -F "$2/loop.fs" >/dev/null 2>&1
+	fi
+	
+	mount -o loop,sync "$2/loop.fs" "$2"
+	
+	# if test failed at any point, we may have temp files left behind
+	rm "$T1" "$T2" 2>/dev/null; rmdir "$2/lost+found" 2>/dev/null
+}
+
+# Copy content of rootcopy directory to union
+# $1 = data directory
+# $2 = union directory
+copy_rootcopy_content()
+{
+	debug_log "copy_rootcopy_content" "$*"
+	live_log "copy_rootcopy_content" "$*"
+	local FULL_ROOTCOPY_DIR
+	
+	FULL_ROOTCOPY_DIR="$1/$ARCHDIR/$ROOTCOPY_DIR"
+	
+	if [ ! "$ROOTCOPY" ]; then
+		return
+	fi
+	
+	if [ "$(ls -1 "$FULL_ROOTCOPY_DIR/" 2>/dev/null)" != "" ]; then
+		live_log "FULL_ROOTCOPY_DIR=$FULL_ROOTCOPY_DIR/"
+		echo_star; echo "Copying content of rootcopy directory..."
+		cp -a "$FULL_ROOTCOPY_DIR"/* "$2"
+	fi
+}
+
+# Copy data to RAM if requested
+# $1 = live data directory
+# $2 = changes directory
+#
+copy_to_ram()
+{
+	debug_log "copy_to_ram" "$*"
+	live_log "copy_to_ram" "$*"
+	local MDIR MDEV RAM
+	
+	if [ ! "$TORAM" ]; then
+		echo "$1"
+		return
+	fi
+	
+	echo_green_star >&2; echo "Copying $SYSNAME data to RAM ..." >&2
+	RAM="$(dirname "$2")"/RamSystemBundle
+	live_log "FULL_RAM_DIR=$RAM"
+	mkdir  -p "$RAM"
+	cp -a "$1"/* "$RAM"
+	echo "$RAM"
+	MDIR="$(mounted_dir "$1")"
+	MDEV="$(mounted_dev "$1")"
+	MDEV="$(losetup $MDEV 2>/dev/null | cut -d " " -f 3)"
+	umount "$MDIR" 2>/dev/null
+	
+	if [ "$MDEV" ]; then # iso was mounted here, try to unmount the FS it resides on too
+		MDEV="$(mounted_dev "$MDEV")"
+		umount "$MDEV" 2>/dev/null
+	fi
+}
+
+# part of load script
+#
+load_filter()
+{
+	if [ "$1" = "" ]; then
+		cat -
+	else
+		cat - | egrep "$1"
+	fi
+}
+
+# part of noload script
+#
+noload_filter()
+{
+	if [ "$1" = "" ]; then
+		cat -
+	else
+		cat - | egrep -v "$1"
+	fi
+}
+
+# addition load filter
+#
+filter_load_addition()
+{
+	load_filter $LOAD_ADDITION
+}
+
+# addition noload filter
+#
+filter_noload_addition()
+{
+	noload_filter $NOLOAD_ADDITION
+}
+
+# firmware load filter
+#
+filter_load_firmware()
+{
+	load_filter $LOAD_FIRMWARE
+}
+
+# firmware noload filter
+#
+filter_noload_firmware()
+{
+	noload_filter $NOLOAD_FIRMWARE
+}
+
+# sort bundles by number even if they are in subdirectory
+#
+sort_bundle()
+{
+	cat - | sed -r "s,(.*/(.*)),\\2:\\1," | sort -n | cut -d : -f 2-
+}
+
+# Mount single bundle as loop and add it to union
+# then mount it
+# $1 = bundle
+# $2 = directory where to mount bundle
+# $3 = directory where union is mounted
+#
+mount_sqfs_aufs()
+{
+	debug_log "mount_sqfs_aufs" "$*"
+	live_log "mount_sqfs_aufs" "$*"
+	local BAS SQFS
+	
+	BAS=$(basename $1)
+	
+	if [ -f "$1" ]; then
+		SQFS=$(head -n 1 $1 | grep "hsqs")
+		if [ "$SQFS" ]; then
+			echo_green_arrow; echo "$BAS"
+			live_log "BUNDLE_FOUND=$1"
+			mkdir -p "$2"
+			mount -o loop -t squashfs "$1" "$2"
+			mount -o remount,add:1:"$2" aufs "$3"
+		else
+			echo_red_arrow; echo "$BAS"
+			live_log "BUNDLE_NOT_SQFS=$1"
+		fi
+	else
+		echo_red_arrow; echo "$BAS"
+		live_log "BUNDLE_NOT_FOUND=$1"
+	fi
+}
+
+# Mount multiple bundles and add it to union
+# $1 = multiple bundle that given
+# $2 = directory where System Directory of live system is exist
+# $3 = directory where to mount bundle
+# $4 = directory where union is mounted
+#
+multi_mount_sqfs_aufs()
+{
+	debug_log "multi_mount_sqfs_aufs" "$*"
+	live_log "multi_mount_sqfs_aufs" "$*"
+	local BUNDLE
+	
+	for BUNDLE in $1; do
+		mount_sqfs_aufs "$2/$ARCHDIR/$BUNDLE" "$3/$BUNDLE" "$4"
+	done
+}
+
+# Mount squashfs filesystem bundles and add them to union
+# $1 = directory where System Directory of live system is exist
+# $2 = directory where to mount bundles
+# $3 = directory where union is mounted
+#
+default_bundle_handling()
+{
+	debug_log "default_bundle_handling" "$*"
+	live_log "default_bundle_handling" "$*"
+	local BUNDLE32 BUN32 BUNDLE BUN FIRMWARE FIRM SB32 SB64 CORE86 PATCH86 KERNELB COREB PATCHB FULL_ARCHDIR32 FULL_ARCHDIR
+	
+	echo_green_star; echo "$1/$ARCHDIR"
+	FULL_ARCHDIR32="$1/$ARCHDIR32"
+	FULL_ARCHDIR="$1/$ARCHDIR"
+	SB32="$FULL_ARCHDIR32/$SYSBUN"
+	SB="$FULL_ARCHDIR/$SYSBUN"
+	
+	if [ "$ARCH" = "x86_64" -a "$LOAD32" ]; then
+			echo_green_star; echo "Loading System32 ..."
+			CORE86B="02-Core-x86.$BEXT" # Core X86 file name
+			PATCH86B="03-Patch-x86.$BEXT" # Patch X86 file name
+			live_log "FULL_COREX86=$SB32/$CORE86B"
+			mount_sqfs_aufs "$SB32/$CORE86B" "$2/$CORE86B" "$3"
+			live_log "FULL_PATCHx86=$SB32/$PATCH86B"
+			mount_sqfs_aufs "$SB32/$PATCH86B" "$2/$PATCH86B" "$3"
+			( cd "$FULL_ARCHDIR32" ; find Addition/ -name "*.$BEXT" 2>/dev/null | sort_bundle | filter_load_addition) | filter_noload_addition | while read BUNDLE32; do
+				BUN32="$(basename "$BUNDLE32")"
+				live_log "FULL_ADDITIONX86=$FULL_ARCHDIR32/$BUNDLE32"
+				mount_sqfs_aufs "$FULL_ARCHDIR32/$BUNDLE32" "$2/$BUN32" "$3"
+			done
+	fi
+	
+	echo_green_star; echo "Finding System Bundle $ARCH ..."
+	KERNELB="00-Kernel-$KERNEL.$BEXT" # Kernel file name
+	live_log "FULL_KERNEL=$SB/$KERNELB"
+	mount_sqfs_aufs "$SB/$KERNELB" "$2/$KERNELB" "$3"
+	( cd "$SB32" ; find 01-Firmware/ -name "01-Firmware-*.$BEXT" 2>/dev/null | sort_bundle | filter_load_firmware) | grep '[.]'$BEXT'$' | filter_noload_firmware | while read FIRMWARE; do
+		FIRM="$(basename "$FIRMWARE")"
+		live_log "FULL_FIRMWARE=$SB32/$FIRMWARE"
+		mount_sqfs_aufs "$SB32/$FIRMWARE" "$2/$FIRM" "$3"
+	done
+	
+	COREB="02-Core-$ARCH.$BEXT" # Core file name
+	PATCHB="03-Patch-$ARCH.$BEXT" # Patch file name
+	live_log "FULL_CORE=$SB/$COREB"
+	mount_sqfs_aufs "$SB/$COREB" "$2/$COREB" "$3"
+	live_log "FULL_PATCH=$SB/$PATCHB"
+	mount_sqfs_aufs "$SB/$PATCHB" "$2/$PATCHB" "$3"
+	echo_green_star; echo "Finding Addition $ARCH ..."
+	( cd "$FULL_ARCHDIR" ; find Addition/ -name "*.$BEXT" 2>/dev/null | sort_bundle | filter_load_addition) | filter_noload_addition | while read BUNDLE; do
+		BUN="$(basename "$BUNDLE")"
+		live_log "FULL_ADDITION=$FULL_ARCHDIR/$BUNDLE"
+		mount_sqfs_aufs "$FULL_ARCHDIR/$BUNDLE" "$2/$BUN" "$3"
+	done
+}
+
+# Create empty fstab properly
+# $1 = root directory
+# $2 = directory where boot disk is mounted
+#
+fstab_create()
+{
+	debug_log "fstab_create" "$*"
+	live_log "fstab_create" "$*"
+	local FSTAB DEVICE FS LABEL BOOTDEVICE OPTS
+	
+	FSTAB="$1/etc/fstab"
+	echo aufs / aufs defaults 0 0 > $FSTAB
+	echo proc /proc proc defaults 0 0 >> $FSTAB
+	echo sysfs /sys sysfs defaults 0 0 >> $FSTAB
+	echo devpts /dev/pts devpts gid=5,mode=620 0 0 >> $FSTAB
+	echo tmpfs /dev/shm tmpfs defaults 0 0 >> $FSTAB
+	
+	if [ ! "$AUTOMOUNT" ]; then
+		return
+	fi
+	
+	BOOTDEVICE=$(df "$2" | tail -n 1 | cut -d " " -f 1)
+	echo >> $FSTAB
+	
+	blkid | grep -v "^/dev/loop" | grep -v "^/dev/zram" | cut -d: -f 1 | while read DEVICE; do
+		FS="$(device_fs $DEVICE)"
+		LABEL="$(basename $DEVICE)"
+		OPTS="defaults,noatime,nofail,x-systemd.device-timeout=10"
+		if [ "$FS" != "swap" -a "$FS" != "squashfs" -a "$DEVICE" != "$BOOTDEVICE" ]; then
+			mkdir -p "$1/media/$LABEL"
+			echo "$DEVICE" "/media/$LABEL" $FS $OPTS 0 0 >> $FSTAB
+		fi
+	done
+}
+
+# Change root and execute init
+# $1 = where to change root
+#
+change_root()
+{
+	debug_log "change_root" "$*"
+	live_log "change_root" "$*"
+	local INITDIR
+	
+	# if we are booting over httpfs, we need to copyup some files so they are
+	# accessible on union without any further lookup down, else httpfs locks
+	if [ "$(network_dev)" != "" ]; then
+		touch "/net.up.flag"
+		touch "$1/etc/resolv.conf"
+		touch "$1/etc/hosts"
+		touch "$1/etc/gai.conf"
+	fi
+	
+	umount /proc
+	umount /sys
+	cd "$1"
+	# make sure important device files and directories are in union
+	mkdir -p boot dev proc sys tmp media mnt run
+	chmod 1777 tmp
+	
+	if [ ! -e dev/console ]; then mknod dev/console c 5 1; fi
+	if [ ! -e dev/tty ]; then mknod dev/tty c 5 0; fi
+	if [ ! -e dev/tty0 ]; then mknod dev/tty0 c 4 0; fi
+	if [ ! -e dev/tty1 ]; then mknod dev/tty1 c 4 1; fi
+	if [ ! -e dev/null ]; then mknod dev/null c 1 3; fi
+	if [ ! -e sbin/fsck.aufs ]; then ln -s /bin/true sbin/fsck.aufs; fi
+	
+	# find chroot and init
+	if [ -x bin/chroot -o -L bin/chroot ]; then  CHROOT=bin/chroot; fi
+	if [ -x sbin/chroot -o -L sbin/chroot ]; then  CHROOT=sbin/chroot; fi
+	if [ -x usr/bin/chroot -o -L usr/bin/chroot ]; then  CHROOT=usr/bin/chroot; fi
+	if [ -x usr/sbin/chroot -o -L usr/sbin/chroot ]; then CHROOT=usr/sbin/chroot; fi
+	if [ "$CHROOT" = "" ]; then fatal "Can't find executable chroot command"; fi
+	if [ -x bin/init -o -L bin/init ]; then INIT=bin/init; fi
+	if [ -x sbin/init -o -L sbin/init  ]; then INIT=sbin/init; fi
+	if [ "$INIT" = "" ]; then fatal "Can't find executable init command"; fi
+	
+	INITDIR="initramfs"
+	live_log "INIT_DIR=/$INITDIR"
+	mkdir -p $INITDIR
+	mount -n -o remount,ro aufs .
+	pivot_root . $INITDIR
+	exec $CHROOT . $INIT < dev/console > dev/console 2>&1
+}
+
+# Default Init Procedure
+# The default procedure of Shadows Linux.
+# Some condition are not supported.
+#
+default_init_procedure()
+{
+	debug_log "default_init_procedure" "$*"
+	live_log "default_init_procedure" "$*"
+	
+	transfer_initramfs
+	
+	echo ; header "Starting $SYSNAME init ..."
+	init_proc_sysfs
+	# update all cmdline value
+	update_cmdline_binary_value; update_cmdline_string_value; debug_shell
+	# update all value to live log
+	value_live_log; debug_shell
+	# load some modules manually first, then modprobe everything we have
+	init_devs
+	init_aufs
+	init_zram
+	# modprobe all devices excluding network drivers
+	modprobe_all -v /drivers/net/
+	# find data dir with filesystem bundles
+	SYSTEM_DIRECTORY="$(find_sysdir 45 "$DATAMNT")"; debug_shell
+	# setup persistent changes, if possible
+	persistent_changes "$SYSTEM_DIRECTORY" "$CHANGES"; debug_shell
+	# copy to RAM if needed
+	SYSTEM_DIRECTORY="$(copy_to_ram "$SYSTEM_DIRECTORY" "$CHANGES")"; debug_shell
+	# init aufs union
+	init_union "$CHANGES" "$UNION"; debug_shell
+	# add system bundle to union
+	default_bundle_handling "$SYSTEM_DIRECTORY" "$BUNDLES" "$UNION"; debug_shell
+	# rootcopy
+	copy_rootcopy_content "$SYSTEM_DIRECTORY" "$UNION"; debug_shell
+	# create fstab
+	fstab_create "$UNION" "$DATAMNT"; debug_shell
+
+	echo ; header "Starting $SYSNAME union system ..."
+	change_root "$UNION"
+	header "!!ERROR occured!!"
+	/bin/sh
+}
